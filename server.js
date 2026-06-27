@@ -39,11 +39,17 @@ app.use((req, res, next) => {
 });
 
 // Shared headers for MarzPay
-const marzHeaders = {
-    'Authorization': `Basic ${MARZPAY_AUTH}`,
-    'Content-Type': 'application/json',
-    'Accept': 'application/json',
-};
+function getMarzHeaders(reqBody) {
+    // Allow PHP to pass auth override in the request body
+    const auth = reqBody?._marzpay_auth || MARZPAY_AUTH;
+    // Remove internal field before forwarding
+    if (reqBody?._marzpay_auth) delete reqBody._marzpay_auth;
+    return {
+        'Authorization': `Basic ${auth}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+    };
+}
 
 // Health check
 app.get('/health', async (_, res) => {
@@ -62,11 +68,16 @@ app.get('/', (_, res) => {
 // Collect money (initiate payment)
 app.post('/collect', async (req, res) => {
     try {
-        const r = await axios.post(`${MARZPAY_BASE}/collect-money`, req.body, { headers: marzHeaders });
+        const headers = getMarzHeaders(req.body);
+        console.log('[COLLECT] Request body:', JSON.stringify(req.body));
+        console.log('[COLLECT] Auth header:', headers.Authorization?.substring(0, 20) + '...');
+        const r = await axios.post(`${MARZPAY_BASE}/collect-money`, req.body, { headers });
+        console.log('[COLLECT] Response:', JSON.stringify(r.data));
         res.json(r.data);
     } catch (e) {
-        console.error('[COLLECT]', e.message, e.response?.data);
-        res.json(e.response?.data ?? { status: 'error', message: e.message });
+        console.error('[COLLECT] Error:', e.message);
+        console.error('[COLLECT] Response data:', JSON.stringify(e.response?.data));
+        res.status(e.response?.status || 500).json(e.response?.data ?? { status: 'error', message: e.message });
     }
 });
 
@@ -74,8 +85,9 @@ app.post('/collect', async (req, res) => {
 app.get('/status/:uuid', async (req, res) => {
     res.set('Cache-Control', 'no-store, no-cache');
     try {
+        const headers = getMarzHeaders(null);
         const url = `${MARZPAY_BASE}/collect-money/${req.params.uuid}?_t=${Date.now()}`;
-        const r = await axios.get(url, { headers: { ...marzHeaders, 'Cache-Control': 'no-cache' } });
+        const r = await axios.get(url, { headers: { ...headers, 'Cache-Control': 'no-cache' } });
         res.json(r.data);
     } catch (e) {
         console.error('[STATUS]', e.message, e.response?.data);
